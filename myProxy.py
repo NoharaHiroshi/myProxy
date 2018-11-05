@@ -1,43 +1,51 @@
 # encoding=utf-8
 
 import socket
+import re
 
 
-def server_proxy():
-    ip = "127.0.0.1"
-    port = 9800
-    server_sock = socket.socket()
-    server_sock.bind((ip, port))
-    server_sock.listen(5)
-    print "[*] listening on %s:%d" % (ip, port)
-    part = 0
+class Proxy:
+    def __init__(self, ip, port):
+        self.ip = ip
+        self.port = port
+        self.request_url = None
+        self.client_date = None
+        self.server_proxy()
 
-    while True:
-        print 'server waiting...'
-        conn, addr = server_sock.accept()
-        remote_addr = conn.getpeername()
-        print remote_addr
+    def server_proxy(self):
+        server_sock = socket.socket()
+        server_sock.bind((self.ip, self.port))
+        server_sock.listen(5)
+        print "[*] listening on %s:%d" % (self.ip, self.port)
 
-        client_data = conn.recv(1024)
-        print client_data
-        part += 1
-        conn.sendall(str(part))
-        conn.close()
+        while True:
+            print 'server waiting...'
+            conn, addr = server_sock.accept()
 
+            self.client_data = conn.recv(1024)
+            print self.client_data
+            req_url = re.findall('http\S+', self.client_data)
+            if len(req_url):
+                self.request_url = req_url[0]
+            response = self.client_proxy()
+            conn.sendall(response)
+            conn.close()
 
-def client_proxy():
-    url = 'http://www.sina.com.cn'
-    port = 80
-    client_socket = socket.socket()
-    client_socket.connect((url, port))
-    request_url = 'GET / HTTP/1.1\r\nHost: www.sina.com.cn\r\nConnection: close\r\n\r\n'
-    client_socket.send(request_url.encode())
-    response = b''
-    rec = client_socket.recv(1024)
-    while rec:
-        response += rec
+    def client_proxy(self):
+        url = self.request_url
+        port = 80
+        client_socket = socket.socket()
+        client_socket.connect((url, port))
+        client_socket.send(self.client_data.encode())
+        response = b''
         rec = client_socket.recv(1024)
-    print(response.decode())
+        while rec:
+            response += rec
+            rec = client_socket.recv(1024)
+        print(response.decode())
+        return response.decode()
 
 if __name__ == '__main__':
-    client_proxy()
+    ip = '127.0.0.1'
+    port = 9800
+    proxy = Proxy(ip, port)
