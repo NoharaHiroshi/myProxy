@@ -21,16 +21,17 @@ class Proxy:
             conn, addr = server_sock.accept()
             raw_data = conn.recv(1024)
             if raw_data:
-                print raw_data
                 client_query_dict = Proxy.analysis_http_request(raw_data)
-                url = client_query_dict.get('host_v_url')
-                port = client_query_dict.get('host_v_port')
+                url = client_query_dict.get('host_url')
+                port = client_query_dict.get('host_port')
                 if client_query_dict.get('methods') != 'CONNECT':
                     response = self.client_proxy(url, port, raw_data)
                     conn.sendall(response)
             conn.close()
 
     def client_proxy(self, url, port, client_data=None):
+        data = 0
+        print '[%s] url: %s:%s' % (data, url, port)
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((url, port))
         if not client_data:
@@ -42,8 +43,12 @@ class Proxy:
             response = b''
             rec = client_socket.recv(1024)
             while rec:
+                print rec
                 response += rec
                 rec = client_socket.recv(1024)
+                data += 1
+                print '[%s] url: %s:%s' % (data, url, port)
+            response_data = Proxy.analysis_http_response(response)
             client_socket.close()
             return response.decode()
 
@@ -54,28 +59,40 @@ class Proxy:
         new_data_dict = dict()
         for i, data_item in enumerate(_raw_data_list):
             if i == 0:
-                new_data_dict['methods'] = data_item
+                new_data_dict['methods'] = data_item.replace('\r', '')
             if i == 1:
-                new_data_dict['query_full_url'] = data_item
+                new_data_dict['query_full_url'] = data_item.replace('\r', '')
             if i == 2:
-                new_data_dict['version'] = data_item
+                new_data_dict['version'] = data_item.replace('\r', '')
             if data_item == "Host:":
-                new_data_dict['host_k'] = data_item
-                new_data_dict['host_v'] = _raw_data_list[i+1]
-                host_list = new_data_dict['host_v'].split(':')
+                new_data_dict['host'] = _raw_data_list[i + 1].replace('\r', '')
+                host_list = new_data_dict['host'].split(':')
+                new_data_dict['host_url'] = host_list[0].replace('\r', '')
                 if len(host_list) == 1:
-                    new_data_dict['host_v_url'] = host_list[0]
-                    new_data_dict['host_v_port'] = 80
+                    new_data_dict['host_port'] = 80
                 else:
-                    new_data_dict['host_v_url'] = host_list[0]
-                    new_data_dict['host_v_port'] = host_list[1]
-                new_data_dict['host'] = '%s %s' % (data_item, _raw_data_list[i+1])
+                    new_data_dict['host_port'] = host_list[1].replace('\r', '')
             if data_item == "Proxy-Connection:":
-                new_data_dict['connection'] = '%s %s' % ('Connection:', _raw_data_list[i+1])
+                new_data_dict['connection'] = _raw_data_list[i+1].replace('\r', '')
             if data_item == "User-Agent:":
                 new_data_dict['userAgent'] = \
-                    'User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) ' \
+                    'Mozilla/5.0 (Windows NT 6.1; Win64; x64) ' \
                     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36'
+        return new_data_dict
+
+    @classmethod
+    def analysis_http_response(cls, raw_data):
+        _raw_data_list = '\n'.join(raw_data.split(' ')).split('\n')
+        _raw_data_list = [data for data in _raw_data_list if data]
+        print _raw_data_list
+        new_data_dict = dict()
+        for i, data_item in enumerate(_raw_data_list):
+            if i == 0:
+                new_data_dict['version'] = data_item.replace('\r', '')
+            if i == 1:
+                new_data_dict['status'] = data_item.replace('\r', '')
+            if i == 2:
+                new_data_dict['status_text'] = data_item.replace('\r', '')
         return new_data_dict
 
 
