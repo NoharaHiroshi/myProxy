@@ -8,9 +8,6 @@ class Proxy:
     def __init__(self, ip, port):
         self.ip = ip
         self.port = port
-        self.connect_url = None
-        self.client_date = None
-        self.client_query = None
         self.server_proxy()
 
     def server_proxy(self):
@@ -22,32 +19,36 @@ class Proxy:
         while True:
             print 'server waiting...'
             conn, addr = server_sock.accept()
-            self.client_data = conn.recv(1024)
-            if self.client_data:
-                print 'client_query: %s' % self.client_query
-                self.connect_url, self.client_query = Proxy.convert_http_request(self.client_data)
-                response = self.client_proxy()
-                conn.sendall(response)
+            raw_data = conn.recv(1024)
+            if raw_data:
+                print raw_data
+                client_query_dict = Proxy.analysis_http_request(raw_data)
+                url = client_query_dict.get('host_v_url')
+                port = client_query_dict.get('host_v_port')
+                if client_query_dict.get('methods') != 'CONNECT':
+                    response = self.client_proxy(url, port, raw_data)
+                    conn.sendall(response)
             conn.close()
 
-    def client_proxy(self):
-        print 'connect_url: %s' % self.connect_url
-        url = self.connect_url
-        port = 80
+    def client_proxy(self, url, port, client_data=None):
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((url, port))
-        client_socket.send(self.client_data.encode())
-        response = b''
-        rec = client_socket.recv(1024)
-        while rec:
-            response += rec
+        if not client_data:
+            response = b'HTTP/1.1 200 Connection Established'
+            client_socket.close()
+            return response.decode()
+        else:
+            client_socket.send(client_data)
+            response = b''
             rec = client_socket.recv(1024)
-        print(response.decode())
-        client_socket.close()
-        return response.decode()
+            while rec:
+                response += rec
+                rec = client_socket.recv(1024)
+            client_socket.close()
+            return response.decode()
 
     @classmethod
-    def convert_http_request(cls, raw_data):
+    def analysis_http_request(cls, raw_data):
         _raw_data_list = '\n'.join(raw_data.split(' ')).split('\n')
         _raw_data_list = [data for data in _raw_data_list if data]
         new_data_dict = dict()
@@ -55,12 +56,19 @@ class Proxy:
             if i == 0:
                 new_data_dict['methods'] = data_item
             if i == 1:
-                new_data_dict['query_url'] = data_item
+                new_data_dict['query_full_url'] = data_item
             if i == 2:
                 new_data_dict['version'] = data_item
             if data_item == "Host:":
                 new_data_dict['host_k'] = data_item
                 new_data_dict['host_v'] = _raw_data_list[i+1]
+                host_list = new_data_dict['host_v'].split(':')
+                if len(host_list) == 1:
+                    new_data_dict['host_v_url'] = host_list[0]
+                    new_data_dict['host_v_port'] = 80
+                else:
+                    new_data_dict['host_v_url'] = host_list[0]
+                    new_data_dict['host_v_port'] = host_list[1]
                 new_data_dict['host'] = '%s %s' % (data_item, _raw_data_list[i+1])
             if data_item == "Proxy-Connection:":
                 new_data_dict['connection'] = '%s %s' % ('Connection:', _raw_data_list[i+1])
@@ -68,25 +76,30 @@ class Proxy:
                 new_data_dict['userAgent'] = \
                     'User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) ' \
                     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36'
-        query_str = '%s / %s\r\n%s\r\n%s\r\n\r\n' % (new_data_dict['methods'],
-                                                     new_data_dict['version'],
-                                                     new_data_dict['host'],
-                                                     new_data_dict['connection']
-                                                     )
-        print query_str
-        return new_data_dict['host_v'], query_str
+        return new_data_dict
 
 
 if __name__ == '__main__':
     ip = '127.0.0.1'
     port = 9800
     proxy = Proxy(ip, port)
-    Proxy.convert_http_request()
     # client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # url = "element-cn.eleme.io"
     # port = 80
     # client_socket.connect((url, port))
-    # client_socket.send('GET / HTTP/1.1\r\nHost: element-cn.eleme.io\r\nConnection: close\r\n\r\n')
+    # client_socket.send('''
+    #     GET http://element-cn.eleme.io/ HTTP/1.1
+    #     Host: element-cn.eleme.io
+    #     Connection: keep-alive
+    #     Cache-Control: max-age=0
+    #     Upgrade-Insecure-Requests: 1
+    #     User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36
+    #     Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8
+    #     Accept-Encoding: gzip, deflate
+    #     Accept-Language: zh-CN,zh;q=0.9
+    #     Cookie: _ga=GA1.2.1328272763.1537261519; _gid=GA1.2.1715809031.1541582527
+    #     If-Modified-Since: Thu, 01 Nov 2018 08:38:20 GMT
+    # ''')
     # buffer = []
     # while True:
     #     # 每次最多接收1k字节:
