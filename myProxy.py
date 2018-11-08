@@ -2,6 +2,7 @@
 
 import socket
 import re
+import gzip
 
 
 class Proxy:
@@ -20,12 +21,19 @@ class Proxy:
             print 'server waiting...'
             conn, addr = server_sock.accept()
             raw_data = conn.recv(1024)
+            print '---------------- query info ----------------'
+            print raw_data
             if raw_data:
                 client_query_dict = Proxy.analysis_http_request(raw_data)
                 url = client_query_dict.get('host_url')
                 port = client_query_dict.get('host_port')
+                query_str = '%s %s %s \r\nHost: %s\r\nConnection: close\r\n\r\n' % (client_query_dict['methods'],
+                                                                                    client_query_dict['query_full_url'],
+                                                                                    client_query_dict['version'],
+                                                                                    client_query_dict['host']
+                                                                                    )
                 if client_query_dict.get('methods') != 'CONNECT':
-                    response = self.client_proxy(url, port, raw_data)
+                    response = self.client_proxy(url, port, query_str)
                     conn.sendall(response)
             conn.close()
 
@@ -42,15 +50,17 @@ class Proxy:
             client_socket.send(client_data)
             response = b''
             rec = client_socket.recv(1024)
+            print '---------------- return info ----------------'
+            print rec
             while rec:
                 print rec
                 response += rec
                 rec = client_socket.recv(1024)
                 data += 1
                 print '[%s] url: %s:%s' % (data, url, port)
-            response_data = Proxy.analysis_http_response(response)
+            response_dict = Proxy.analysis_http_response(rec)
             client_socket.close()
-            return response.decode()
+            return response
 
     @classmethod
     def analysis_http_request(cls, raw_data):
@@ -72,6 +82,8 @@ class Proxy:
                     new_data_dict['host_port'] = 80
                 else:
                     new_data_dict['host_port'] = host_list[1].replace('\r', '')
+            if data_item == "Accept-Encoding":
+                continue
             if data_item == "Proxy-Connection:":
                 new_data_dict['connection'] = _raw_data_list[i+1].replace('\r', '')
             if data_item == "User-Agent:":
@@ -82,9 +94,8 @@ class Proxy:
 
     @classmethod
     def analysis_http_response(cls, raw_data):
-        _raw_data_list = '\n'.join(raw_data.split(' ')).split('\n')
+        _raw_data_list = raw_data.split('\n')
         _raw_data_list = [data for data in _raw_data_list if data]
-        print _raw_data_list
         new_data_dict = dict()
         for i, data_item in enumerate(_raw_data_list):
             if i == 0:
@@ -104,19 +115,7 @@ if __name__ == '__main__':
     # url = "element-cn.eleme.io"
     # port = 80
     # client_socket.connect((url, port))
-    # client_socket.send('''
-    #     GET http://element-cn.eleme.io/ HTTP/1.1
-    #     Host: element-cn.eleme.io
-    #     Connection: keep-alive
-    #     Cache-Control: max-age=0
-    #     Upgrade-Insecure-Requests: 1
-    #     User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36
-    #     Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8
-    #     Accept-Encoding: gzip, deflate
-    #     Accept-Language: zh-CN,zh;q=0.9
-    #     Cookie: _ga=GA1.2.1328272763.1537261519; _gid=GA1.2.1715809031.1541582527
-    #     If-Modified-Since: Thu, 01 Nov 2018 08:38:20 GMT
-    # ''')
+    # client_socket.send('GET / HTTP/1.1\r\nHost: element-cn.eleme.io\r\nConnection: close\r\n\r\n')
     # buffer = []
     # while True:
     #     # 每次最多接收1k字节:
