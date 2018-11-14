@@ -3,12 +3,15 @@
 import socket
 import re
 import gzip
+import time
+import traceback
 
 
 class Proxy:
     def __init__(self, ip, port):
         self.ip = ip
         self.port = port
+        self.request_dict = dict()
         self.server_proxy()
 
     def server_proxy(self):
@@ -19,29 +22,34 @@ class Proxy:
 
         while True:
             try:
-                print 'server waiting...'
+                print '*************** server waiting... ***************'
                 conn, addr = server_sock.accept()
                 raw_data = conn.recv(1024)
                 if raw_data:
-                    data_dict = self.handle_raw_request(raw_data)
-                    handle_data = self.return_new_request(data_dict)
+                    handle_data = self.handle_raw_request(raw_data)
                     if handle_data:
-                        print '---------------- query info ----------------'
-                        print handle_data
-                    response = self.client_proxy(data_dict['host_url'], data_dict['host_port'], handle_data)
-                    conn.sendall(response)
-                    conn.close()
+                        response = self.client_proxy(self.request_dict['host_url'],
+                                                     int(self.request_dict['host_port']),
+                                                     handle_data)
+                        conn.sendall(response)
+                print '*************** server end ***************'
             except Exception as e:
                 print 'server error...'
+                print traceback.format_exc(e)
+            finally:
+                conn.close()
 
     def handle_raw_request(self, raw_data):
         raw_data_list = '\n'.join(raw_data.split(' ')).split('\n')
         _raw_data_list = [data for data in raw_data_list if data]
+        full_cookie = ''
         new_data_dict = dict()
         for i, data_item in enumerate(_raw_data_list):
-            # 基本参数
+            # 获取基本参数
             if i == 0:
                 new_data_dict['methods'] = data_item.replace('\r', '')
+                if new_data_dict['methods'].upper() == 'CONNECT':
+                    return
             if i == 1:
                 new_data_dict['query_full_url'] = data_item.replace('\r', '')
             if i == 2:
@@ -63,50 +71,45 @@ class Proxy:
             if data_item == "Accept:":
                 new_data_dict['accept'] = _raw_data_list[i+1].replace('\r', '')
             if data_item == "Cookie:":
-                new_data_dict['cookie'] = _raw_data_list[i+1].replace('\r', '')
-        return new_data_dict
-
-    def return_new_request(self, new_data_dict):
-        # 处理url
-        request_list = list()
-        methods = new_data_dict['methods']
-        if methods == 'CONNECT':
-            return
-        query_url = re.sub('.+?%s' % new_data_dict['host'], '', new_data_dict['query_full_url'])
-        request_list.append(query_url)
-        request_list.append('%s %s %s' % (methods, query_url, new_data_dict['version']))
-        request_list.append('Host: %s' % new_data_dict['host'])
-        request_list.append('User-Agent: %s' % new_data_dict['userAgent'])
-        request_list.append('Connection: %s' % new_data_dict['connection'])
-        for k, v in new_data_dict.items():
-            if k in ['methods', 'host', 'version', 'userAgent', 'connection', 'query_full_url']:
-                continue
-            elif k == 'cookie':
-                request_list.append('Cookie: %s' % new_data_dict['cookie'])
-            elif k == 'accept':
-                request_list.append('Accept: %s' % new_data_dict['accept'])
-        return '\r\n'.join(request_list)
+                j = 1
+                while len(_raw_data_list[i+j].split(';')) == 2:
+                    full_cookie += _raw_data_list[i+j]
+                    j += 1
+                full_cookie += _raw_data_list[i+j]
+                new_data_dict['cookie'] = full_cookie
+            self.request_dict = new_data_dict
+        # 返回新的请求头
+        raw_data_list = raw_data.split(' ')
+        # 请求url
+        raw_data_list[1] = re.sub('.+?%s' % new_data_dict['host'], '', new_data_dict['query_full_url'])
+        new_data_str = ' '.join(raw_data_list)
+        new_data_str = new_data_str.replace('Proxy-Connection', 'Connection')
+        print new_data_str
+        return new_data_str
 
     def client_proxy(self, url, port, client_data):
+        if not client_data:
+            return
+        response = ''
         data = 0
-        print '[%s] url: %s:%s' % (data, url, port)
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.connect((url, port))
-        if client_data:
+        try:
+            client_socket.connect((url, port))
             client_socket.send(client_data)
-            response = b''
             rec = client_socket.recv(1024)
-            print '---------------- return info ----------------'
             while rec:
                 response += rec
                 rec = client_socket.recv(1024)
-                data += 1
                 print '[%s] url: %s:%s' % (data, url, port)
-            print response
+                data += 1
+            print 'return info end'
+        except Exception as e:
+            err = traceback.format_exc(e)
+            print err
+            response = ''
+        finally:
             client_socket.close()
             return response
-        else:
-            return 'no info'
 
 
 if __name__ == '__main__':
