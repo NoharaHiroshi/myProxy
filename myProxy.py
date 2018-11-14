@@ -5,34 +5,35 @@ import re
 import gzip
 import time
 import traceback
+import threading
 
 
 class Proxy:
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, thread=5):
         self.ip = ip
         self.port = port
         self.request_dict = dict()
-        self.server_proxy()
+        self.server_sock = socket.socket()
+        self.server_sock.bind((self.ip, self.port))
+        self.server_sock.listen(5)
+        for i in range(thread):
+            threading.Thread(target=self.server_proxy, args=(i,)).start()
 
-    def server_proxy(self):
-        server_sock = socket.socket()
-        server_sock.bind((self.ip, self.port))
-        server_sock.listen(5)
-        print "[*] listening on %s:%d" % (self.ip, self.port)
-
+    def server_proxy(self, num=0):
+        print "[%s] listening on %s:%d" % (num, self.ip, self.port)
         while True:
             try:
-                print '*************** server waiting... ***************'
-                conn, addr = server_sock.accept()
+                print '[%s] *************** server waiting... ***************' % num
+                conn, addr = self.server_sock.accept()
                 raw_data = conn.recv(1024)
                 if raw_data:
                     handle_data = self.handle_raw_request(raw_data)
                     if handle_data:
                         response = self.client_proxy(self.request_dict['host_url'],
                                                      int(self.request_dict['host_port']),
-                                                     handle_data)
+                                                     handle_data, num)
                         conn.sendall(response)
-                print '*************** server end ***************'
+                print '[%s] *************** server end ***************' % num
             except Exception as e:
                 print 'server error...'
                 print traceback.format_exc(e)
@@ -84,15 +85,16 @@ class Proxy:
         raw_data_list[1] = re.sub('.+?%s' % new_data_dict['host'], '', new_data_dict['query_full_url'])
         new_data_str = ' '.join(raw_data_list)
         new_data_str = new_data_str.replace('Proxy-Connection', 'Connection')
-        print new_data_str
         return new_data_str
 
-    def client_proxy(self, url, port, client_data):
+    def client_proxy(self, url, port, client_data, num):
+        print '[%s]' % num, client_data
         if not client_data:
             return
         response = ''
         data = 0
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.settimeout(20)
         try:
             client_socket.connect((url, port))
             client_socket.send(client_data)
@@ -100,7 +102,7 @@ class Proxy:
             while rec:
                 response += rec
                 rec = client_socket.recv(1024)
-                print '[%s] url: %s:%s' % (data, url, port)
+                print '%s url: %s:%s' % (data, url, port)
                 data += 1
             print 'return info end'
         except Exception as e:
