@@ -12,31 +12,35 @@ class Proxy:
     def __init__(self, ip, port):
         self.ip = ip
         self.port = port
-        self.request_list = list()
+        self.request_dict = dict()
+        self.run_host_list = list()
 
-    def main(self, server_num=5):
+    def main(self):
         self.server_sock = socket.socket()
         self.server_sock.bind((self.ip, self.port))
         self.server_sock.listen(5)
         print "[*] listening on %s:%d" % (self.ip, self.port)
-        for i in range(server_num):
-            threading.Thread(target=self.server_proxy, name=i).start()
+        threading.Thread(target=self.server_proxy).start()
+        threading.Thread(target=self.client_proxy).start()
 
     def server_proxy(self):
         while True:
             try:
-                print '[%s] *************** server waiting... ***************' % threading.current_thread().name
+                print '*************** server waiting... ***************'
+                # 接受请求
                 conn, addr = self.server_sock.accept()
                 raw_data = conn.recv(1024)
                 if raw_data:
                     handle_data_dict, handle_data_str = self.handle_raw_request(raw_data)
                     if handle_data_dict:
-                        self.request_list.append({
-                            'host': handle_data_dict['host'],
+                        host = handle_data_dict['host']
+                        if host not in self.request_dict:
+                            self.request_dict[host] = list()
+                        self.request_dict[host].append({
                             'request_dict': handle_data_dict,
-                            'request_str': handle_data_str,
+                            'request_str': handle_data_str
                         })
-                print '[%s] *************** server end ***************' % threading.current_thread().name
+                print '*************** server end ***************'
             except Exception as e:
                 print 'server error...'
                 print traceback.format_exc(e)
@@ -95,41 +99,50 @@ class Proxy:
         try:
             print 'client start'
             request_data_dict = dict()
-            if not host or client_socket:
-                if not len(self.request_list):
-                    time.sleep(5)
-                    self.client_proxy()
-                for i, req in enumerate(self.request_list):
-                    request_data_dict = req
-                    self.request_list.remove(i)
-                    break
-                data = request_data_dict.get('request_dict')
-                client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                client_socket.connect((data.get('host_url'), data.get('host_port')))
-            else:
-                for i, req in enumerate(self.request_list):
-                    if req.get('host') == host:
-                        request_data_dict = req
-                        self.request_list.remove(i)
-                        break
+            if self.request_dict:
+                if not host or client_socket:
+                    for host, request_list in self.request_dict.items():
+                        if host:
+                            if host not in self.run_host_list:
+                                self.run_host_list.append(host)
+                                for req in request_list:
+                                    request_data_dict = req
+                                    request_list.remove(req)
+                                    break
+                                data = request_data_dict.get('request_dict')
+                                client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                client_socket.connect((data.get('host_url'), data.get('host_port')))
+                else:
+                    request_list = self.request_dict.get(host)
+                    if len(request_list):
+                        for req in request_list:
+                            request_data_dict = req
+                            request_list.remove(req)
+                            break
                     else:
+                        # 当前host没有数据要处理了，连接通道等待一段时间
                         while wait_time:
                             wait_time -= 1
                             self.client_proxy(host, client_socket, wait_time)
-                        return
-            host = request_data_dict.get('host')
-            print 'current host: %s' % host
-            data_str = request_data_dict.get('request_str')
-            client_socket.send(data_str)
-            rec = client_socket.recv(1024)
-            print '[%s] client start part 0' % threading.current_thread().name
-            while rec:
-                response += rec
+                        # 当前host没有要处理的数据了，将连接关闭，并将当前host从运行列表中删除
+                        client_socket.close()
+                        self.run_host_list.remove(host)
+                host = request_data_dict.get('host')
+                print 'current host: %s' % host
+                data_str = request_data_dict.get('request_str')
+                client_socket.sendall(data_str)
                 rec = client_socket.recv(1024)
-                data_part_num += 1
-                print '[%s] client start part %s' % (threading.current_thread().name, data_part_num)
-            print 'client end'
-            self.client_proxy(host, client_socket)
+                print '[%s] client start part 0' % threading.current_thread().name
+                while rec:
+                    response += rec
+                    rec = client_socket.recv(1024)
+                    data_part_num += 1
+                    print '[%s] client start part %s' % (threading.current_thread().name, data_part_num)
+                print 'client end'
+                self.client_proxy(host, client_socket)
+            else:
+                time.sleep(5)
+                self.client_proxy()
         except Exception as e:
             print traceback.format_exc(e)
             response = ''
@@ -143,6 +156,7 @@ if __name__ == '__main__':
     ip = '127.0.0.1'
     port = 9800
     proxy = Proxy(ip, port)
+    proxy.main()
     # test_raw_data = "GET http://www.runoob.com/http/http-messages.html HTTP/1.1\r\n" \
     #     "Host: www.runoob.com\r\n" \
     #     "Proxy-Connection: keep-alive\r\n"\
