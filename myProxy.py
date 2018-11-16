@@ -24,8 +24,7 @@ class Proxy:
         threading.Thread(target=self.server_proxy).start()
         while True:
             if self.request_dict and self.server:
-                threading.Thread(target=self.client_proxy).start()
-                break
+                self.client_proxy()
 
     def server_proxy(self):
         conn = None
@@ -46,7 +45,7 @@ class Proxy:
                             'request_dict': handle_data_dict,
                             'request_str': handle_data_str
                         }
-                        print raw_data_dict
+                        print raw_data_dict.get('request_str')
                         self.request_dict[host].append(raw_data_dict)
 
                 print '*************** server end ***************'
@@ -67,7 +66,7 @@ class Proxy:
             if i == 0:
                 new_data_dict['methods'] = data_item.replace('\r', '')
                 if new_data_dict['methods'].upper() == 'CONNECT':
-                    return '', ''
+                    return dict(), ''
             if i == 1:
                 new_data_dict['query_full_url'] = data_item.replace('\r', '')
             if i == 2:
@@ -103,65 +102,68 @@ class Proxy:
         new_data_str = new_data_str.replace('Proxy-Connection', 'Connection')
         return new_data_dict, new_data_str
 
-    def client_proxy(self, host=None, client_socket=None, wait_time=10):
+    def client_proxy(self, host=None, client_socket=None, wait_time=3):
+        # 请求队列中没有数据直接退出
         response = ''
         data_part_num = 0
+        if not client_socket:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             print 'client start'
             request_data_dict = dict()
             # 初次处理请求时选择host
-            if not host or not client_socket:
+            if not host:
                 for host, request_list in self.request_dict.items():
-                    if host:
+                    if len(request_list):
                         if host not in self.run_host_list:
                             self.run_host_list.append(host)
                             for req in request_list:
                                 request_data_dict = req
                                 break
                             data = request_data_dict.get('request_dict')
-                            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                             client_socket.connect((data.get('host_url'), data.get('host_port')))
                             break
             else:
                 request_list = self.request_dict.get(host)
-                if len(request_list):
+                if request_list and len(request_list):
                     for req in request_list:
                         request_data_dict = req
                         break
+            if request_data_dict:
+                print 'current host: %s' % host
+                data_str = request_data_dict.get('request_str')
+                client_socket.sendall(data_str)
+                rec = client_socket.recv(1024)
+                print 'client start part 0'
+                while rec:
+                    response += rec
+                    rec = client_socket.recv(1024)
+                    data_part_num += 1
+                    print 'client start part %s' % data_part_num
+                print response
+                self.request_dict.get(host).remove(request_data_dict)
+                self.server.sendall(response)
+                print 'client end'
+            # 当前host没有数据要处理了，连接通道等待一段时间
+            # 好奇怪，循環的時候wait_time數值會異常
+            # 10,9,8,7,6,5,4,3,2,1,1,2,1,3,2,1,1,2,1,1,4,3,2,1,1,2,1,1
+            if not len(self.request_dict.get(host)):
+                if wait_time:
+                    print 'socket connection wait times %s' % wait_time
+                    wait_time -= 1
+                    self.client_proxy(host, client_socket, wait_time)
                 else:
-                    # 当前host没有数据要处理了，连接通道等待一段时间
-                    while wait_time:
-                        print 'socket connection wait times %s' % wait_time
-                        wait_time -= 1
-                        self.client_proxy(host, client_socket, wait_time)
                     # 当前host没有要处理的数据了，将连接关闭，并将当前host从运行列表中删除
                     client_socket.close()
                     if host in self.request_dict:
                         del self.request_dict[host]
                     if host in self.run_host_list:
                         self.run_host_list.remove(host)
-            print 'current host: %s' % host
-            data_str = request_data_dict.get('request_str')
-            client_socket.sendall(data_str)
-            rec = client_socket.recv(1024)
-            print 'client start part 0'
-            while rec:
-                response += rec
-                rec = client_socket.recv(1024)
-                data_part_num += 1
-                print 'client start part %s' % data_part_num
-            print response
-            self.request_dict.get(host).remove(request_data_dict)
-            self.server.sendall(response)
-            print 'client end'
-            self.client_proxy(host, client_socket)
+                    return
+            else:
+                self.client_proxy(host, client_socket, wait_time)
         except Exception as e:
             print traceback.format_exc(e)
-            response = ''
-        finally:
-            if client_socket:
-                client_socket.close()
-            return response
 
 
 if __name__ == '__main__':
