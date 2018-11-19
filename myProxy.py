@@ -21,7 +21,8 @@ class Proxy:
         self.server_sock.bind((self.ip, self.port))
         self.server_sock.listen(5)
         print "[*] listening on %s:%d" % (self.ip, self.port)
-        threading.Thread(target=self.server_proxy).start()
+        for i in range(5):
+            threading.Thread(target=self.server_proxy).start()
         while True:
             if self.request_dict and self.server:
                 self.client_proxy()
@@ -102,12 +103,18 @@ class Proxy:
         new_data_str = new_data_str.replace('Proxy-Connection', 'Connection')
         return new_data_dict, new_data_str
 
+    def client_handler(self):
+        pass
+
+    # client proxy 处理同个host的数据
     def client_proxy(self, host=None, client_socket=None, wait_time=3):
-        # 请求队列中没有数据直接退出
         response = ''
         data_part_num = 0
+        # 如果没有socket，先创建
         if not client_socket:
+            print 'client first start'
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.settimeout(3)
         try:
             print 'client start'
             request_data_dict = dict()
@@ -122,6 +129,7 @@ class Proxy:
                                 break
                             data = request_data_dict.get('request_dict')
                             client_socket.connect((data.get('host_url'), data.get('host_port')))
+                            print 'client_socket connect %s' % host
                             break
             else:
                 request_list = self.request_dict.get(host)
@@ -132,21 +140,23 @@ class Proxy:
             if request_data_dict:
                 print 'current host: %s' % host
                 data_str = request_data_dict.get('request_str')
-                client_socket.sendall(data_str)
+                client_socket.send(data_str)
                 rec = client_socket.recv(1024)
                 print 'client start part 0'
-                while rec:
-                    response += rec
-                    rec = client_socket.recv(1024)
-                    data_part_num += 1
-                    print 'client start part %s' % data_part_num
-                print response
+                try:
+                    while rec:
+                        response += rec
+                        rec = client_socket.recv(1024)
+                        data_part_num += 1
+                        print 'client start part %s' % data_part_num
+                except Exception as e:
+                    print traceback.format_exc(e)
                 self.request_dict.get(host).remove(request_data_dict)
-                self.server.sendall(response)
+                if response:
+                    print response
+                    self.server.send(response)
                 print 'client end'
             # 当前host没有数据要处理了，连接通道等待一段时间
-            # 好奇怪，循環的時候wait_time數值會異常
-            # 10,9,8,7,6,5,4,3,2,1,1,2,1,3,2,1,1,2,1,1,4,3,2,1,1,2,1,1
             if not len(self.request_dict.get(host)):
                 if wait_time:
                     print 'socket connection wait times %s' % wait_time
@@ -164,6 +174,13 @@ class Proxy:
                 self.client_proxy(host, client_socket, wait_time)
         except Exception as e:
             print traceback.format_exc(e)
+            if client_socket:
+                client_socket.close()
+            if host and host in self.request_dict:
+                del self.request_dict[host]
+            if host and host in self.run_host_list:
+                self.run_host_list.remove(host)
+
 
 
 if __name__ == '__main__':
@@ -171,16 +188,32 @@ if __name__ == '__main__':
     port = 9800
     proxy = Proxy(ip, port)
     proxy.main()
-    # test_raw_data = "GET http://www.runoob.com/http/http-messages.html HTTP/1.1\r\n" \
-    #     "Host: www.runoob.com\r\n" \
-    #     "Proxy-Connection: keep-alive\r\n"\
-    #     "Cache-Control: max-age=0\r\n"\
-    #     "Upgrade-Insecure-Requests: 1\r\n"\
-    #     "User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36\r\n"\
-    #     "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\r\n"\
-    #     "Accept-Encoding: gzip, deflate\r\n"\
-    #     "Accept-Language: zh-CN,zh;q=0.9\r\n"\
-    #     "Cookie: Hm_lvt_8e2a116daf0104a78d601f40a45c75b4=1531204556,1531292087,1531293153,1531810509; _ga=GA1.2.101945719.1532075214; Hm_lvt_3eec0b7da6548cf07db3bc477ea905ee=1539859078,1540203684,1540437180,1541641433; _gid=GA1.2.1847875878.1541641434; Hm_lpvt_3eec0b7da6548cf07db3bc477ea905ee=1541641439\r\n"
-    # raw_data_dict = proxy.handle_raw_request(test_raw_data)
-    # return_data = proxy.return_new_request(raw_data_dict)
-    # print return_data
+    # request = 'GET /sufei/archive/2011/10/22/2221289.html HTTP/1.1\r\n' \
+    #           'Host: www.cnblogs.com\r\n' \
+    #           'Connection: keep-alive\r\n' \
+    #           'Cache-Control: max-age=0\r\n' \
+    #           'Upgrade-Insecure-Requests: 1\r\n' \
+    #           'User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36\r\n' \
+    #           'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\r\n' \
+    #           'Accept-Language: zh-CN,zh;q=0.9\r\n' \
+    #           'Cookie: lhb_smart_0=1; bdshare_firstime=1450082451040; pgv_pvi=2583218176; sc_is_visitor_unique=rx9614694.1495769027.F29B09CFC31E4F1C9109598499DD825C.1.1.1.1.1.1.1.1.1; lhb_smart_1=1; __dtsu=D9E9B66B1B7BE859C66B1D530236BD76; __utma=226521935.1795679384.1491985595.1510040704.1510040704.12; __gads=ID=6f9784691678bd47:T=1517989282:S=ALNI_MaSpxD8HSoJoMcPRR3EtDKkVv-Wjg; _ga=GA1.2.1795679384.1491985595; CNZZDATA3347352=cnzz_eid%3D2034679851-1528869226-https%253A%252F%252Fwww.baidu.com%252F%26ntime%3D1528869226; Hm_lvt_5dd8d6438668e6e79fa6f818cd433df3=1\r\n'
+    # host = 'www.cnblogs.com'
+    # port = 80
+    # client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # client_socket.settimeout(3)
+    # client_socket.connect((host, port))
+    # client_socket.send(request)
+    # response = ''
+    # rec = client_socket.recv(1024)
+    # data = 0
+    # try:
+    #     while rec:
+    #         print rec
+    #         print data
+    #         data += 1
+    #         response += rec
+    #         rec = client_socket.recv(1024)
+    # except Exception as e:
+    #     print traceback.format_exc(e)
+    # print response
+    # client_socket.close()
