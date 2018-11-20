@@ -5,6 +5,7 @@ import re
 import gzip
 import time
 import traceback
+import ssl
 import threading
 
 
@@ -36,10 +37,9 @@ class Proxy:
                     handle_data_dict, handle_data_str = self.handle_raw_request(raw_data)
                     if handle_data_dict and handle_data_str:
                         print handle_data_str
-                        response = self.client_proxy(handle_data_dict, handle_data_str)
-                        print response
+                        print handle_data_dict
+                        response = self.handle_response(self.client_proxy(handle_data_dict, handle_data_str))
                         conn.send(response)
-                        time.sleep(2)
                 print '*************** server end ***************'
         except Exception as e:
             print 'server error...'
@@ -49,11 +49,15 @@ class Proxy:
                 conn.close()
 
     def client_proxy(self, handle_data_dict, handle_data_str):
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        port = int(handle_data_dict.get('host_port')) if handle_data_dict.get('host_port') else 80
+        host = handle_data_dict.get('host_url')
+        if port != 80:
+            client_socket = ssl.wrap_socket(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+        else:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             print '*************** client start ***************'
-            host = handle_data_dict.get('host_url')
-            port = handle_data_dict.get('host_port')
             client_socket.connect((host, port))
             client_socket.send(handle_data_str)
             client_socket.settimeout(10)
@@ -88,8 +92,8 @@ class Proxy:
             # 获取基本参数
             if i == 0:
                 new_data_dict['methods'] = data_item.replace('\r', '')
-                if new_data_dict['methods'].upper() == 'CONNECT':
-                    return dict(), ''
+                # if new_data_dict['methods'].upper() == 'CONNECT':
+                #     return dict(), ''
             if i == 1:
                 new_data_dict['query_full_url'] = data_item.replace('\r', '')
             if i == 2:
@@ -123,11 +127,26 @@ class Proxy:
         raw_data_list[1] = re.sub('.+?%s' % new_data_dict['host'], '', new_data_dict['query_full_url'])
         new_data_str = ' '.join(raw_data_list)
         new_data_str = new_data_str.replace('Proxy-Connection', 'Connection')
-        new_data_str = new_data_str.replace('keep-alive', 'close')
+        if new_data_dict.get('host_port') == 80:
+            new_data_str = new_data_str.replace('keep-alive', 'close')
         new_data_str = new_data_str.replace('gzip, deflate', '*')
         return new_data_dict, new_data_str
 
-    def handle_302(self):
+    def handle_response(self, response):
+        _response_list = response.split('\r\n')
+        tmp_index = 0
+        for i,  res in enumerate(_response_list):
+            if res == '':
+                tmp_index = i
+                print tmp_index
+                break
+        if tmp_index:
+            del _response_list[tmp_index+1]
+            response = '\r\n'.join(_response_list)
+            print response
+        return response
+
+    def handle_https_request(self, request):
         pass
 
 
