@@ -32,13 +32,14 @@ class Proxy:
                 # 接受请求
                 conn, addr = self.server_sock.accept()
                 self.server = conn
-                raw_data = conn.recv(1024)
+                raw_data, address = conn.recvfrom(1024)
                 if raw_data:
                     handle_data_dict, handle_data_str = self.handle_raw_request(raw_data)
                     if handle_data_dict and handle_data_str:
                         print handle_data_str
                         print handle_data_dict
-                        response = self.handle_response(self.client_proxy(handle_data_dict, handle_data_str))
+                        response = self.client_proxy(handle_data_dict, handle_data_str)
+                        print response
                         conn.send(response)
                 print '*************** server end ***************'
         except Exception as e:
@@ -143,7 +144,6 @@ class Proxy:
         if tmp_index:
             del _response_list[tmp_index+1]
             response = '\r\n'.join(_response_list)
-            print response
         return response
 
     def handle_https_request(self, request):
